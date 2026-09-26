@@ -1,0 +1,253 @@
+openapi: 3.0.3
+info:
+  title: CBA Retail Banking & AML Transaction Monitoring API
+  version: "1.0.0"
+  description: >
+    REST API for the CBA Retail Banking & AML Transaction Monitoring System.
+    See README.md for the full narrative documentation, AML rule semantics, and risk
+    scoring methodology. All responses use the standard envelope
+    { success, message, errorCode, data } and list endpoints additionally return `meta`.
+servers:
+  - url: http://localhost:5000/api
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        errorCode: { type: string, nullable: true }
+        data: { nullable: true }
+    Error:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+        errorCode: { type: string }
+        data: { nullable: true, example: null }
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        "200": { description: OK }
+  /auth/register:
+    post:
+      summary: Register a new customer
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, phone, password]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                phone: { type: string }
+                password: { type: string }
+      responses:
+        "201": { description: Created }
+        "400": { description: Validation error }
+        "409": { description: Duplicate email/phone }
+  /auth/login:
+    post:
+      summary: Login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "200": { description: OK }
+        "401": { description: Invalid credentials }
+  /auth/logout:
+    post:
+      summary: Logout (revokes current token)
+      responses:
+        "200": { description: OK }
+  /auth/me:
+    get:
+      summary: Current authenticated user
+      responses:
+        "200": { description: OK }
+  /customers/{id}:
+    get:
+      summary: Get customer profile (owner or staff)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "403": { description: Forbidden }
+        "404": { description: Not found }
+  /customers/search:
+    get:
+      summary: Search customers (employee/admin)
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: riskLevel, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200": { description: OK }
+  /accounts/{id}:
+    get:
+      summary: Get account (owner or staff)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /accounts/{id}/freeze:
+    put:
+      summary: Freeze account (employee/admin)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { reason: { type: string } }
+      responses:
+        "200": { description: OK }
+        "409": { description: Already frozen }
+  /accounts/{id}/unfreeze:
+    put:
+      summary: Unfreeze account (employee/admin)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "409": { description: Already active }
+  /transactions:
+    post:
+      summary: Create a transaction (deposit/withdrawal/transfer/payment)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId, type, amount]
+              properties:
+                accountId: { type: string }
+                type: { type: string, enum: [DEPOSIT, WITHDRAWAL, TRANSFER, PAYMENT] }
+                amount: { type: number }
+                currency: { type: string }
+                location: { type: string }
+                description: { type: string }
+                destinationAccountNumber: { type: string }
+                counterpartyName: { type: string }
+                idempotencyKey: { type: string }
+      responses:
+        "201": { description: Created - transaction + AML evaluation result }
+        "400": { description: Validation error / insufficient balance / frozen account }
+        "403": { description: Not the account owner }
+        "404": { description: Account not found }
+  /transactions/{accountId}:
+    get:
+      summary: Get transactions for an account (owner or staff), filterable/paginated
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /transactions/search:
+    get:
+      summary: Search transactions across all customers (employee/admin)
+      responses:
+        "200": { description: OK }
+  /transactions/statement/{accountId}:
+    get:
+      summary: Download account statement (PDF or CSV)
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string } }
+        - { name: startDate, in: query, required: true, schema: { type: string, format: date } }
+        - { name: endDate, in: query, required: true, schema: { type: string, format: date } }
+        - { name: format, in: query, schema: { type: string, enum: [pdf, csv] } }
+      responses:
+        "200": { description: File stream }
+  /aml/alerts:
+    get:
+      summary: List AML alerts (employee/admin)
+      responses:
+        "200": { description: OK }
+  /aml/alerts/{id}:
+    get:
+      summary: Get AML alert detail (employee/admin)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /aml/alerts/{id}/review:
+    put:
+      summary: Review/resolve an AML alert (employee/admin)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, reviewNotes]
+              properties:
+                status: { type: string, enum: [UNDER_REVIEW, CLEARED, CONFIRMED_SUSPICIOUS] }
+                reviewNotes: { type: string }
+      responses:
+        "200": { description: OK }
+  /aml/rules:
+    get:
+      summary: List AML rules (employee/admin)
+      responses:
+        "200": { description: OK }
+  /aml/rules/{id}:
+    put:
+      summary: Update AML rule configuration (admin)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /aml/rules/{id}/toggle:
+    put:
+      summary: Enable/disable an AML rule (admin)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties: { enabled: { type: boolean } }
+      responses:
+        "200": { description: OK }
+  /dashboard/stats:
+    get:
+      summary: Compliance dashboard statistics (employee/admin)
+      responses:
+        "200": { description: OK }
+  /dashboard/me:
+    get:
+      summary: Customer dashboard (customer)
+      responses:
+        "200": { description: OK }
+  /audit-logs:
+    get:
+      summary: List audit logs (admin)
+      responses:
+        "200": { description: OK }
